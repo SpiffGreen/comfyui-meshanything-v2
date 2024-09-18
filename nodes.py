@@ -524,6 +524,7 @@ class MeshAnything3D:
         model = MeshAnythingV2.from_pretrained("Yiwen-ntu/meshanythingv2")
         
         saved = list()
+        mesh = [mesh]
         full_output_folder, filename, counter, subfolder, filename_prefix = get_save_image_path("meshsave",get_output_directory())
         for (batch_number, single_mesh) in enumerate(mesh):
             filename_with_batch_num = filename.replace("%batch_num%", str(batch_number))
@@ -651,10 +652,13 @@ class Save_Mesh:
             self.__class__.__name__,
         )
 
+        if isinstance(mesh, list):
+            mesh = mesh[0]
+
         if mesh_file_path is not None:
             mesh.export(mesh_file_path)
 
-        return (mesh,)
+        return ([mesh],)
     
 class Preview_3DMesh:
 
