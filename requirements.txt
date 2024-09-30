@@ -14,7 +14,6 @@ gradio
 spaces
 Pillow
 numpy
-importlib
 kiui
 xatlas
 pygltflib

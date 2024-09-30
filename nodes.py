@@ -5,6 +5,7 @@ import trimesh
 import numpy as np
 import datetime
 import folder_paths
+from typing import NamedTuple
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 from accelerate.utils import DistributedDataParallelKwargs
@@ -47,11 +48,17 @@ def parse_save_filename(save_path, output_directory, supported_extensions, class
 
     return None
 
+class PointCloud(NamedTuple):
+    points: np.array
+    colors: np.array
+    normals: np.array
+
 class Dataset:
-    def __init__(self, input_list, mc=True, mc_level=7, pc=False, pc_out=8192):
+    def __init__(self, input_list, mc=True, mc_level=7, pc = False, 
+                 pc_data=None, pc_path=False, pc_out=8192):
         super().__init__()
         self.data = []
-        if pc: #if Point cloud is enabled
+        if pc_path: #if Point cloud path is enabled
             for input_path in input_list:
                 # load npy
                 cur_data = np.load(input_path)
@@ -65,6 +72,18 @@ class Dataset:
                         "uid": input_path.split("/")[-1].split(".")[0],
                     }
                 )
+        elif pc: #if point cloud is provided directly
+            cur_data = pc_data
+            #"input pc_normal should have at least 8192 points"
+            assert (cur_data.shape[0] >= 8192)    
+            idx = np.random.choice(cur_data.shape[0], pc_out, replace=False)
+            cur_data = cur_data[idx]
+            self.data.append(
+                {
+                    "pc_normal": cur_data,
+                    "uid": input_path.split("/")[-1].split(".")[0],
+                }
+            )
 
         else: #using mesh option
             mesh_list = []
@@ -113,10 +132,12 @@ class MeshAnything3D:
         return {
             "required": {
                 "mesh_file_path": ("STRING", {"default": '', "multiline": False}),
+                "point_cloud": ("POINTCLOUD", {"default": PointCloud(
+                    points=np.nan, colors=np.nan, normals=np.nan)}),
                 "mc_level": ("INT",{"default": 7,"min": 0,"max": 20}),
                 "mc": ("BOOLEAN",{"default": True, "label_on": "True","label_off": "False"}),
                 "no_pc_vertices": ("INT",{"default": 8192,"min": 8192,"max": 100000}),
-                "pc": ("BOOLEAN",{"default": False, "label_on": "True","label_off": "False"}),
+                "pc_path": ("BOOLEAN",{"default": False, "label_on": "True","label_off": "False"}),
                 "batchsize_per_gpu": ("INT",{"default": 1, "min": 1, "max": 5}),
                 "seed": ("INT",{"default": 29,"min": 0, "max": 10000000}),
                 "sampling": ("BOOLEAN",{"default": False,"label_on": "max","label_off": "min"}),
@@ -129,7 +150,8 @@ class MeshAnything3D:
     FUNCTION = "mesh_anything"
     CATEGORY = "ComfyMeshAnything/Comfy_MeshAnything_3D"
 
-    def mesh_anything(self, mesh_file_path,mc_level,mc,no_pc_vertices,pc,batchsize_per_gpu,seed,sampling):
+    def mesh_anything(self, mesh_file_path, point_cloud, mc_level, mc,
+                      no_pc_vertices,pc_path,batchsize_per_gpu,seed,sampling):
 
         cur_time = datetime.datetime.now().strftime("%d_%H-%M-%S")
         checkpoint_dir = os.path.join("mesh_output", cur_time)
@@ -143,10 +165,15 @@ class MeshAnything3D:
         )
 
         model = MeshAnythingV2.from_pretrained("Yiwen-ntu/meshanythingv2")
-        
-        if mesh_file_path:
+
+        if point_cloud.points != np.nan:
             set_seed(seed)
-            dataset = Dataset([mesh_file_path], mc, mc_level, pc, no_pc_vertices)
+            dataset = Dataset([mesh_file_path], mc, mc_level,True,
+                              point_cloud.points,pc_path, no_pc_vertices)
+        elif mesh_file_path:
+            set_seed(seed)
+            dataset = Dataset([mesh_file_path], mc, mc_level,False,
+                              point_cloud.points,pc_path, no_pc_vertices)
         else:
             raise ValueError("input_path must be provided.")
 
@@ -185,7 +212,8 @@ class MeshAnything3D:
                     scene_mesh.update_faces(scene_mesh.unique_faces())
                     scene_mesh.remove_unreferenced_vertices()
                     scene_mesh.fix_normals()
-                    save_path = os.path.join(checkpoint_dir, f'{batch_data_label["uid"][batch_id]}_gen.obj')
+                    save_path = os.path.join(checkpoint_dir,
+                                             f'{batch_data_label["uid"][batch_id]}_gen.obj')
                     num_faces = len(scene_mesh.faces)
                     brown_color = np.array([255, 165, 0, 255], dtype=np.uint8)
                     face_colors = np.tile(brown_color, (num_faces, 1))
