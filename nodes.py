@@ -48,11 +48,6 @@ def parse_save_filename(save_path, output_directory, supported_extensions, class
 
     return None
 
-class PointCloud(NamedTuple):
-    points: np.array
-    colors: np.array
-    normals: np.array
-
 class Dataset:
     def __init__(self, input_list, mc=True, mc_level=7, pc = False, 
                  pc_data=None, pc_path=False, pc_out=8192):
@@ -61,7 +56,7 @@ class Dataset:
         if pc_path: #if Point cloud path is enabled
             for input_path in input_list:
                 # load npy
-                cur_data = np.load(input_path)
+                cur_data = np.load(input_path) #allow_pickle = True
                 # sample 8192
                 assert (cur_data.shape[0] >= 8192), "input pc_normal should have at least 8192 points"
                 idx = np.random.choice(cur_data.shape[0], pc_out, replace=False)
@@ -72,18 +67,6 @@ class Dataset:
                         "uid": input_path.split("/")[-1].split(".")[0],
                     }
                 )
-        elif pc: #if point cloud is provided directly
-            cur_data = pc_data
-            #"input pc_normal should have at least 8192 points"
-            assert (cur_data.shape[0] >= 8192)    
-            idx = np.random.choice(cur_data.shape[0], pc_out, replace=False)
-            cur_data = cur_data[idx]
-            self.data.append(
-                {
-                    "pc_normal": cur_data,
-                    "uid": input_path.split("/")[-1].split(".")[0],
-                }
-            )
 
         else: #using mesh option
             mesh_list = []
@@ -132,16 +115,20 @@ class MeshAnything3D:
         return {
             "required": {
                 "mesh_file_path": ("STRING", {"default": '', "multiline": False}),
-                "point_cloud": ("POINTCLOUD", {"default": PointCloud(
-                    points=np.nan, colors=np.nan, normals=np.nan)}),
+                "pc": ("BOOLEAN",{"default": False, "label_on": "True","label_off": "False"}),
                 "mc_level": ("INT",{"default": 7,"min": 0,"max": 20}),
                 "mc": ("BOOLEAN",{"default": True, "label_on": "True","label_off": "False"}),
                 "no_pc_vertices": ("INT",{"default": 8192,"min": 8192,"max": 100000}),
                 "pc_path": ("BOOLEAN",{"default": False, "label_on": "True","label_off": "False"}),
+                "pc_file": ("STRING", {"default": '', "multiline": False}),
                 "batchsize_per_gpu": ("INT",{"default": 1, "min": 1, "max": 5}),
-                "seed": ("INT",{"default": 29,"min": 0, "max": 10000000}),
-                "sampling": ("BOOLEAN",{"default": False,"label_on": "max","label_off": "min"}),
+                "seed": ("INT",{"default": 0,"min": 0, "max": 10000000}),
+                "sampling": ("BOOLEAN",{"default": False,"label_on": "True","label_off": "False"}),
             },
+            "optional" :
+            {
+                "point_cloud": ("POINTCLOUD", {"default": ''}),
+            }
         }
 
     RETURN_TYPES = ("MESH","STRING",)
@@ -150,8 +137,9 @@ class MeshAnything3D:
     FUNCTION = "mesh_anything"
     CATEGORY = "ComfyMeshAnything/Comfy_MeshAnything_3D"
 
-    def mesh_anything(self, mesh_file_path, point_cloud, mc_level, mc,
-                      no_pc_vertices,pc_path,batchsize_per_gpu,seed,sampling):
+    def mesh_anything(self, mesh_file_path, pc,mc_level, mc,
+                      no_pc_vertices,pc_path,pc_file, batchsize_per_gpu,seed,
+                      sampling, *args, **kwargs):
 
         cur_time = datetime.datetime.now().strftime("%d_%H-%M-%S")
         checkpoint_dir = os.path.join("mesh_output", cur_time)
@@ -165,15 +153,19 @@ class MeshAnything3D:
         )
 
         model = MeshAnythingV2.from_pretrained("Yiwen-ntu/meshanythingv2")
-
-        if point_cloud.points != np.nan:
-            set_seed(seed)
-            dataset = Dataset([mesh_file_path], mc, mc_level,True,
-                              point_cloud.points,pc_path, no_pc_vertices)
-        elif mesh_file_path:
+        point_cloud = ""
+        print(f"working directory {os.getcwd()}")
+        if mesh_file_path:
             set_seed(seed)
             dataset = Dataset([mesh_file_path], mc, mc_level,False,
-                              point_cloud.points,pc_path, no_pc_vertices)
+                              point_cloud,pc_path, no_pc_vertices)
+        elif pc_path:
+            set_seed(seed)
+            mc = False
+            here = os.path.dirname(os.path.abspath(__file__))
+            pc_file = os.path.join(here,pc_file)
+            dataset = Dataset([pc_file], mc, mc_level,False,
+                              point_cloud, pc_path,no_pc_vertices)
         else:
             raise ValueError("input_path must be provided.")
 
